@@ -1,6 +1,7 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import asyncio
+import logging
 import os
 import re
 
@@ -9,70 +10,94 @@ import aiohttp
 from github_stats import Stats
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+
 ################################################################################
 # Helper Functions
 ################################################################################
 
+
 def generate_output_folder() -> None:
-    """
-    Create the output folder if it does not already exist
-    """
     if not os.path.isdir("generated"):
         os.mkdir("generated")
+        logger.info("Created generated/ folder")
 
 
 ################################################################################
-# Individual Image Generation Functions
+# SVG Generation
 ################################################################################
 
-async def generate_overview(s: Stats) -> None:
-    """
-    Generate an SVG badge with summary statistics
-    :param s: Represents user's GitHub statistics
-    """
-    with open("templates/overview.svg", "r") as f:
+
+async def generate_overview(stats: Stats) -> None:
+    logger.info("Generating overview.svg")
+
+    with open("templates/overview.svg", "r", encoding="utf-8") as f:
         output = f.read()
 
-    output = re.sub("{{ name }}", await s.name, output)
-    output = re.sub("{{ stars }}", f"{await s.stargazers:,}", output)
-    output = re.sub("{{ forks }}", f"{await s.forks:,}", output)
-    output = re.sub("{{ contributions }}", f"{await s.total_contributions:,}",
-                    output)
-    changed = (await s.lines_changed)[0] + (await s.lines_changed)[1]
-    output = re.sub("{{ lines_changed }}", f"{changed:,}", output)
-    output = re.sub("{{ views }}", f"{await s.views:,}", output)
-    output = re.sub("{{ repos }}", f"{len(await s.all_repos):,}", output)
+    output = re.sub("{{ name }}", await stats.name, output)
+    output = re.sub("{{ stars }}", f"{await stats.stargazers:,}", output)
+    output = re.sub("{{ forks }}", f"{await stats.forks:,}", output)
+    output = re.sub(
+        "{{ contributions }}",
+        f"{await stats.total_contributions:,}",
+        output,
+    )
+
+    # Disabled unstable contributor stats endpoint
+    output = re.sub("{{ lines_changed }}", "N/A", output)
+
+    output = re.sub("{{ views }}", f"{await stats.views:,}", output)
+    output = re.sub("{{ repos }}", f"{len(await stats.all_repos):,}", output)
 
     generate_output_folder()
-    with open("generated/overview.svg", "w") as f:
+
+    with open("generated/overview.svg", "w", encoding="utf-8") as f:
         f.write(output)
 
+    logger.info("overview.svg generated successfully")
 
-async def generate_languages(s: Stats) -> None:
-    """
-    Generate an SVG badge with summary languages used
-    :param s: Represents user's GitHub statistics
-    """
-    with open("templates/languages.svg", "r") as f:
+
+async def generate_languages(stats: Stats) -> None:
+    logger.info("Generating languages.svg")
+
+    with open("templates/languages.svg", "r", encoding="utf-8") as f:
         output = f.read()
 
     progress = ""
     lang_list = ""
-    sorted_languages = sorted((await s.languages).items(), reverse=True,
-                              key=lambda t: t[1].get("size"))
+
+    sorted_languages = sorted(
+        (await stats.languages).items(),
+        reverse=True,
+        key=lambda t: t[1].get("size"),
+    )
+
     delay_between = 150
+
     for i, (lang, data) in enumerate(sorted_languages):
-        color = data.get("color")
-        color = color if color is not None else "#000000"
-        ratio = [.98, .02]
+        color = data.get("color") or "#000000"
+
+        ratio = [0.98, 0.02]
+
         if data.get("prop", 0) > 50:
-            ratio = [.99, .01]
+            ratio = [0.99, 0.01]
+
         if i == len(sorted_languages) - 1:
             ratio = [1, 0]
-        progress += (f'<span style="background-color: {color};'
-                     f'width: {(ratio[0] * data.get("prop", 0)):0.3f}%;'
-                     f'margin-right: {(ratio[1] * data.get("prop", 0)):0.3f}%;" '
-                     f'class="progress-item"></span>')
+
+        progress += (
+            f'<span style="background-color: {color};'
+            f'width: {(ratio[0] * data.get("prop", 0)):0.3f}%;'
+            f'margin-right: {(ratio[1] * data.get("prop", 0)):0.3f}%;" '
+            f'class="progress-item"></span>'
+        )
+
         lang_list += f"""
 <li style="animation-delay: {i * delay_between}ms;">
 <svg xmlns="http://www.w3.org/2000/svg" class="octicon" style="fill:{color};"
@@ -81,42 +106,76 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 <span class="lang">{lang}</span>
 <span class="percent">{data.get("prop", 0):0.2f}%</span>
 </li>
-
 """
 
     output = re.sub(r"{{ progress }}", progress, output)
     output = re.sub(r"{{ lang_list }}", lang_list, output)
 
     generate_output_folder()
-    with open("generated/languages.svg", "w") as f:
+
+    with open("generated/languages.svg", "w", encoding="utf-8") as f:
         f.write(output)
 
+    logger.info("languages.svg generated successfully")
+
 
 ################################################################################
-# Main Function
+# Main
 ################################################################################
+
 
 async def main() -> None:
-    """
-    Generate all badges
-    """
     access_token = os.getenv("ACCESS_TOKEN")
+
     if not access_token:
-        # access_token = os.getenv("GITHUB_TOKEN")
-        raise Exception("A personal access token is required to proceed!")
+        raise RuntimeError("ACCESS_TOKEN secret is missing")
+
     user = os.getenv("GITHUB_ACTOR")
-    exclude_repos = os.getenv("EXCLUDED")
-    exclude_repos = ({x.strip() for x in exclude_repos.split(",")}
-                     if exclude_repos else None)
-    exclude_langs = os.getenv("EXCLUDED_LANGS")
-    exclude_langs = ({x.strip() for x in exclude_langs.split(",")}
-                     if exclude_langs else None)
-    consider_forked_repos = len(os.getenv("COUNT_STATS_FROM_FORKS")) != 0
-    async with aiohttp.ClientSession() as session:
-        s = Stats(user, access_token, session, exclude_repos=exclude_repos,
-                  exclude_langs=exclude_langs,
-                  consider_forked_repos=consider_forked_repos)
-        await asyncio.gather(generate_languages(s), generate_overview(s))
+
+    if not user:
+        raise RuntimeError("GITHUB_ACTOR environment variable is missing")
+
+    exclude_repos = os.getenv("EXCLUDED", "")
+    exclude_repos = (
+        {x.strip() for x in exclude_repos.split(",") if x.strip()}
+        if exclude_repos
+        else set()
+    )
+
+    exclude_langs = os.getenv("EXCLUDED_LANGS", "")
+    exclude_langs = (
+        {x.strip() for x in exclude_langs.split(",") if x.strip()}
+        if exclude_langs
+        else set()
+    )
+
+    consider_forked_repos = (
+        os.getenv("COUNT_STATS_FROM_FORKS", "false").lower() == "true"
+    )
+
+    logger.info(f"GitHub user: {user}")
+    logger.info(f"Excluded repos: {exclude_repos}")
+    logger.info(f"Excluded langs: {exclude_langs}")
+    logger.info(f"Include forked repos: {consider_forked_repos}")
+
+    timeout = aiohttp.ClientTimeout(total=120)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        stats = Stats(
+            user,
+            access_token,
+            session,
+            exclude_repos=exclude_repos,
+            exclude_langs=exclude_langs,
+            consider_forked_repos=consider_forked_repos,
+        )
+
+        await asyncio.gather(
+            generate_languages(stats),
+            generate_overview(stats),
+        )
+
+    logger.info("All images generated successfully")
 
 
 if __name__ == "__main__":
