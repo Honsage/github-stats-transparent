@@ -163,11 +163,11 @@ async def main() -> None:
     )
 
     max_languages = int(
-        os.getenv("MAX_LANGUAGES", "10")
+        os.getenv("MAX_LANGUAGES", "9")
     )
 
     language_columns = int(
-        os.getenv("LANG_COLUMNS", "2")
+        os.getenv("LANG_COLUMNS", "3")
     )
 
     logger.info(f"GitHub user: {user}")
