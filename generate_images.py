@@ -63,7 +63,11 @@ async def generate_overview(stats: Stats) -> None:
     logger.info("overview.svg generated successfully")
 
 
-async def generate_languages(stats: Stats) -> None:
+async def generate_languages(
+    stats: Stats,
+    max_languages: int,
+    columns: int,
+) -> None:
     logger.info("Generating languages.svg")
 
     with open("templates/languages.svg", "r", encoding="utf-8") as f:
@@ -76,7 +80,7 @@ async def generate_languages(stats: Stats) -> None:
         (await stats.languages).items(),
         reverse=True,
         key=lambda t: t[1].get("size"),
-    )
+    )[:max_languages]
 
     delay_between = 150
 
@@ -110,6 +114,11 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 
     output = re.sub(r"{{ progress }}", progress, output)
     output = re.sub(r"{{ lang_list }}", lang_list, output)
+    output = re.sub(
+        r"{{ columns }}",
+        str(columns),
+        output,
+    )
 
     generate_output_folder()
 
@@ -153,6 +162,14 @@ async def main() -> None:
         os.getenv("COUNT_STATS_FROM_FORKS", "false").lower() == "true"
     )
 
+    max_languages = int(
+        os.getenv("MAX_LANGUAGES", "10")
+    )
+
+    language_columns = int(
+        os.getenv("LANG_COLUMNS", "2")
+    )
+
     logger.info(f"GitHub user: {user}")
     logger.info(f"Excluded repos: {exclude_repos}")
     logger.info(f"Excluded langs: {exclude_langs}")
@@ -171,7 +188,11 @@ async def main() -> None:
         )
 
         await asyncio.gather(
-            generate_languages(stats),
+            generate_languages(
+                stats,
+                max_languages,
+                language_columns,
+            ),
             generate_overview(stats),
         )
 
