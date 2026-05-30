@@ -43,6 +43,8 @@ jobs:
           EXCLUDED: ${{ secrets.EXCLUDED }}
           EXCLUDED_LANGS: ${{ secrets.EXCLUDED_LANGS }}
           COUNT_STATS_FROM_FORKS: ${{ secrets.COUNT_STATS_FROM_FORKS }}
+          MAX_LANGUAGES: ${{ secrets.MAX_LANGUAGES }}
+          LANG_COLUMNS: ${{ secrets.LANG_COLUMNS }}
         run: |
           python --version
           python generate_images.py
